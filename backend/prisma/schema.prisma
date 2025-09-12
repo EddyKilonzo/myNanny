@@ -1,0 +1,74 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  fullName  String
+  role      Role   @default(
+    
+  )
+  profile   Profile?
+  messages  Message[] @relation("UserMessages")
+  jobs      Job[]     @relation("UserJobs")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Profile {
+  id        String   @id @default(uuid())
+  bio       String?
+  location  String?
+  experience Int?
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Job {
+  id        String   @id @default(uuid())
+  title     String
+  description String
+  status    JobStatus @default(PENDING)
+  parentId  String
+  nannyId   String?
+  parent    User      @relation("UserJobs", fields: [parentId], references: [id])
+  nanny     User?     @relation(fields: [nannyId], references: [id])
+  createdAt DateTime  @default(now())
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  senderId  String
+  receiverId String
+  sender    User     @relation("UserMessages", fields: [senderId], references: [id])
+  receiver  User     @relation(fields: [receiverId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  PARENT
+  NANNY
+}
+
+enum JobStatus {
+  PENDING
+  ACCEPTED
+  COMPLETED
+  CANCELLED
+}
