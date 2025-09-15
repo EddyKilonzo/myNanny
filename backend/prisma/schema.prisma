@@ -6,7 +6,6 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
 }
 
 datasource db {
@@ -15,49 +14,175 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  fullName  String
-  role      Role   @default(
-    
-  )
-  profile   Profile?
-  messages  Message[] @relation("UserMessages")
-  jobs      Job[]     @relation("UserJobs")
+  id               String           @id @default(uuid())
+  email            String           @unique
+  password         String
+  fullName         String
+  role             Role             @default(PARENT)
+  accountStatus    AccountStatus    @default(PENDING_PAYMENT)
+  backgroundStatus BackgroundStatus @default(PENDING)
+  approvedAt       DateTime?
+  profile          Profile?
+  // Messaging
+  sentMessages     Message[]        @relation("MessagesSent")
+  receivedMessages Message[]        @relation("MessagesReceived")
+  // Jobs
+  postedJobs       Job[]            @relation("PostedJobs") // as Parent who posted
+  assignedJobs     Job[]            @relation("AssignedJobs") // as Nanny assigned
+  // Payments
+  outgoingPayments Payment[]        @relation("PaymentsFromParent")
+  incomingPayments Payment[]        @relation("PaymentsToNanny")
+  paymentMethods   PaymentMethod[]
+  payouts          Payout[]
+  signupPayments   SignupPayment[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Profile {
-  id        String   @id @default(uuid())
-  bio       String?
-  location  String?
+  id         String  @id @default(uuid())
+  bio        String?
+  location   String?
   experience Int?
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
+  isComplete Boolean @default(false)
+  userId     String  @unique
+  user       User    @relation(fields: [userId], references: [id])
 }
 
 model Job {
-  id        String   @id @default(uuid())
-  title     String
-  description String
-  status    JobStatus @default(PENDING)
-  parentId  String
-  nannyId   String?
-  parent    User      @relation("UserJobs", fields: [parentId], references: [id])
-  nanny     User?     @relation(fields: [nannyId], references: [id])
-  createdAt DateTime  @default(now())
+  id           String    @id @default(uuid())
+  title        String
+  description  String
+  status       JobStatus @default(PENDING)
+  type         JobType   @default(SHORT_TERM)
+  startDate    DateTime?
+  endDate      DateTime?
+  hoursPerWeek Int?
+  parentId     String
+  nannyId      String?
+  parent       User      @relation("PostedJobs", fields: [parentId], references: [id])
+  nanny        User?     @relation("AssignedJobs", fields: [nannyId], references: [id])
+  payment      Payment?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([parentId])
+  @@index([nannyId])
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  content   String
-  senderId  String
+  id         String   @id @default(uuid())
+  content    String
+  senderId   String
   receiverId String
-  sender    User     @relation("UserMessages", fields: [senderId], references: [id])
-  receiver  User     @relation(fields: [receiverId], references: [id])
+  sender     User     @relation("MessagesSent", fields: [senderId], references: [id])
+  receiver   User     @relation("MessagesReceived", fields: [receiverId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+}
+
+model Payment {
+  id               String          @id @default(uuid())
+  jobId            String          @unique
+  parentId         String
+  nannyId          String?
+  amount           Decimal         @db.Decimal(12, 2) // total charged to parent
+  currency         String          @default("KSH")
+  platformFee      Decimal         @default(0) @db.Decimal(12, 2)
+  netToNanny       Decimal         @default(0) @db.Decimal(12, 2)
+  status           PaymentStatus   @default(REQUIRES_CONFIRMATION)
+  provider         PaymentProvider @default(STRIPE)
+  providerIntentId String?
+  providerChargeId String?
+  description      String?
+  metadata         Json?
+
+  job     Job      @relation(fields: [jobId], references: [id])
+  parent  User     @relation("PaymentsFromParent", fields: [parentId], references: [id])
+  nanny   User?    @relation("PaymentsToNanny", fields: [nannyId], references: [id])
+  refunds Refund[]
+  payouts Payout[]
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@index([nannyId])
+  @@index([status, createdAt])
+}
+
+model Refund {
+  id               String       @id @default(uuid())
+  paymentId        String
+  amount           Decimal      @db.Decimal(12, 2)
+  reason           String?
+  providerRefundId String?
+  status           RefundStatus @default(PENDING)
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+}
+
+model Payout {
+  id               String         @id @default(uuid())
+  nannyId          String
+  paymentId        String?
+  amount           Decimal        @db.Decimal(12, 2)
+  currency         String         @default("USD")
+  status           PayoutStatus   @default(PENDING)
+  provider         PayoutProvider @default(STRIPE_CONNECT)
+  providerPayoutId String?
+  metadata         Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  nanny   User     @relation(fields: [nannyId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([nannyId, status])
+}
+
+model PaymentMethod {
+  id               String          @id @default(uuid())
+  userId           String
+  provider         PaymentProvider @default(STRIPE)
+  providerMethodId String // e.g. Stripe PM id
+  brand            String?
+  last4            String?
+  expMonth         Int?
+  expYear          Int?
+  isDefault        Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, providerMethodId])
+  @@index([userId, isDefault])
+}
+
+model SignupPayment {
+  id               String          @id @default(uuid())
+  userId           String
+  amount           Decimal         @db.Decimal(12, 2)
+  currency         String          @default("USD")
+  status           PaymentStatus   @default(REQUIRES_CONFIRMATION)
+  provider         PaymentProvider @default(STRIPE)
+  providerIntentId String?
+  providerChargeId String?
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
 }
 
 enum Role {
@@ -71,4 +196,53 @@ enum JobStatus {
   ACCEPTED
   COMPLETED
   CANCELLED
+}
+
+enum JobType {
+  SHORT_TERM
+  LONG_TERM
+}
+
+enum PaymentStatus {
+  REQUIRES_CONFIRMATION
+  AUTHORIZED
+  SUCCEEDED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CANCELED
+  FAILED
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum PayoutStatus {
+  PENDING
+  IN_TRANSIT
+  PAID
+  FAILED
+  CANCELED
+}
+
+enum PaymentProvider {
+  STRIPE
+}
+
+enum PayoutProvider {
+  STRIPE_CONNECT
+}
+
+enum AccountStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  SUSPENDED
+}
+
+enum BackgroundStatus {
+  PENDING
+  PASSED
+  FAILED
 }

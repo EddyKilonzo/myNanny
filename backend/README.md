@@ -96,3 +96,45 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Prisma and data model (MyNanny backend additions)
+
+- Key models: `User`, `Profile`, `Job`, `Message`, and payments (`Payment`, `Refund`, `Payout`, `PaymentMethod`, `SignupPayment`).
+- Gating fields added:
+  - `User.accountStatus`: `PENDING_PAYMENT | ACTIVE | SUSPENDED`
+  - `User.backgroundStatus`: `PENDING | PASSED | FAILED`
+  - `User.approvedAt`: timestamp set when an admin approves
+  - `Profile.isComplete`: boolean for profile completion
+
+### Access policy
+
+- Public: list jobs (read-only).
+- Interact (post/apply/message): require `User.accountStatus === ACTIVE`, `Profile.isComplete === true`, and `User.backgroundStatus === PASSED`.
+
+### Prisma commands
+
+```bash
+cd backend
+npx prisma format
+npx prisma migrate dev --name sync
+npx prisma generate
+```
+
+On Windows, if you see EPERM during generate (file lock on `query_engine-windows.dll.node`), stop running Node/Nest processes and retry `npx prisma generate`.
+
+### Nest modules wiring
+
+- `PrismaModule` provides/exports `PrismaService`.
+- `UsersModule` imports `PrismaModule` and provides `UsersService`.
+
+Example imports with NodeNext:
+
+```ts
+import { PrismaModule } from './prisma/prisma.module.js';
+import { UsersModule } from './users/users.module.js';
+```
+
+### Billing flow (signup fee)
+
+- Create a `SignupPayment` (e.g., Stripe PaymentIntent) when user signs up or first interacts.
+- On provider success webhook: set `SignupPayment.status = SUCCEEDED` and `User.accountStatus = ACTIVE`.
